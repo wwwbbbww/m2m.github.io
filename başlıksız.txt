@@ -1,0 +1,103 @@
+const flexDiv = document.getElementById('flex');
+const select = document.getElementById('languageSelect');
+const totalCountDisplay = document.getElementById('totalCount');
+const searchInput = document.getElementById('searchRoom');
+
+async function fetchRooms(lang) {
+    try {
+        const res = await fetch(`https://gartic.io/req/list?search=&language[]=${lang}`);
+        const data = await res.json();
+        const active = data.filter(r => r.quant > 0);
+        displayRooms(active);
+    } catch(e) {
+        console.error("Xəta:", e);
+        flexDiv.innerHTML = '<h2>Otaqlar gətirilə bilmədi.</h2>';
+    }
+}
+
+function displayRooms(rooms) {
+    const searchTerm = searchInput.value.toLowerCase();
+    const filtered = rooms.filter(r => r.id.toLowerCase().includes(searchTerm));
+
+    flexDiv.innerHTML = '';
+
+    if (filtered.length === 0) {
+        flexDiv.innerHTML = '<h2>Seçilən dildə otaq yoxdur.</h2>';
+        totalCountDisplay.textContent = '';
+        document.title = "Gartic Viewer";
+        return;
+    }
+
+    filtered.forEach(room => {
+        const flc = document.createElement('div');
+        flc.classList.add('flex-child');
+        flexDiv.appendChild(flc);
+
+        const roomTag = document.createElement('h3');
+        roomTag.innerText = room.id.slice(1);
+        flc.appendChild(roomTag);
+
+        const roomSubjIcon = document.createElement('img');
+        roomSubjIcon.src = `https://gartic.io/static/images/subjects/${room.subject}.svg`;
+        flc.appendChild(roomSubjIcon);
+
+        const inRoomPlayers = document.createElement('p');
+        inRoomPlayers.innerText = `${room.quant} / ${room.max}`;
+        flc.appendChild(inRoomPlayers);
+
+        const rate = room.quant / room.max;
+        if(rate < 0.5) inRoomPlayers.style.color = 'green';
+        else if(rate < 0.8) inRoomPlayers.style.color = 'orange';
+        else inRoomPlayers.style.color = 'red';
+
+        const viewBtn = document.createElement('a');
+        viewBtn.href = `https://gartic.io/${room.code}/viewer`;
+        viewBtn.target = '_blank';
+        viewBtn.innerText = 'Viewer';
+        viewBtn.classList.add('viewer-btn');
+        flc.appendChild(viewBtn);
+
+        // --- WebSocket ilə user list ---
+        fetch(`https://gartic.io/serverViewer?room=${room.code}`)
+        .then(rs => rs.text())
+        .then(dt => {
+            try {
+                const s = dt.slice(15,16);
+                const ws = new WebSocket(`wss://server0${s}.gartic.io/socket.io/?EIO=3&transport=websocket`);
+                ws.onopen = () => ws.send(`42["12",{"v":20000,"sala":"${room.id}"}]`);
+                ws.onmessage = (m) => {
+                    try {
+                        const d = JSON.parse(m.data.slice(2));
+                        if(d[0] == 5){
+                            const usersDiv = document.createElement('div');
+                            usersDiv.classList.add('users');
+                            flc.appendChild(usersDiv);
+                            usersDiv.innerHTML = '';
+                            for(let i=0;i<d[5].length;i++){
+                                const userB = document.createElement('div');
+                                userB.classList.add('user-info');
+
+                                const userPp = document.createElement('img');
+                                userPp.src = d[5][i].foto || 'https://gartic.io/static/images/avatar/svg/0.svg';
+
+                                const userName = document.createElement('p');
+                                userName.innerText = d[5][i].nick;
+
+                                userB.append(userPp, userName);
+                                usersDiv.append(userB);
+                            }
+                        }
+                    } catch(e){ console.error(e); }
+                };
+            } catch(e){ console.error(e); }
+        });
+    });
+
+    totalCountDisplay.innerText = `Otaq sayı: ${filtered.length}, İstifadəçi sayı: ${filtered.reduce((a,c)=>a+c.quant,0)}`;
+    document.title = `Gartic Viewer (${filtered.length})`;
+}
+
+select.addEventListener('change', () => fetchRooms(select.value));
+searchInput.addEventListener('input', () => fetchRooms(select.value));
+
+fetchRooms('23');
